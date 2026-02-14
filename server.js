@@ -1,4 +1,4 @@
-﻿// server.js — EchoVoid: FULL + Gmail SMTP
+﻿// server.js — EchoVoid: FULL + Gmail SMTP (Fix: Instant Response)
 
 const express      = require('express');
 const http         = require('http');
@@ -21,8 +21,8 @@ function uuidv4() {
 // ============================
 // GMAIL НАСТРОЙКИ — ЗАПОЛНИ!
 // ============================
-const GMAIL_USER = 'mziggboy@gmail.com';        // Твой Gmail
-const GMAIL_PASS = 'yypp khoi tfau eamc';         // App Password из шага 1
+const GMAIL_USER = 'mziggboy@gmail.com';        // <--- ВПИШИ СЮДА СВОЙ EMAIL
+const GMAIL_PASS = 'yypp khoi tfau eamc';         // <--- ВПИШИ СЮДА ПАРОЛЬ ПРИЛОЖЕНИЯ
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -35,7 +35,7 @@ const transporter = nodemailer.createTransport({
 // Проверяем подключение
 transporter.verify((error, success) => {
   if (error) {
-    console.error('❌ Gmail SMTP ошибка:', error.message);
+    console.error('❌ Gmail SMTP ошибка подключения:', error.message);
   } else {
     console.log('✅ Gmail SMTP готов к отправке писем');
   }
@@ -51,72 +51,18 @@ function initDatabase() {
     db = new sqlite3.Database(dbFile, (err) => {
       if (err) return reject(err);
       db.serialize(() => {
-        db.run(`CREATE TABLE IF NOT EXISTS users (
-          id TEXT PRIMARY KEY,
-          username TEXT UNIQUE,
-          email TEXT UNIQUE,
-          display_name TEXT,
-          avatar_url TEXT,
-          bio TEXT DEFAULT '',
-          is_online INTEGER DEFAULT 0,
-          last_seen INTEGER,
-          created_at INTEGER
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS otp_codes (
-          email TEXT PRIMARY KEY,
-          code TEXT,
-          expires_at INTEGER
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS sessions (
-          id TEXT PRIMARY KEY,
-          user_id TEXT,
-          token TEXT UNIQUE,
-          created_at INTEGER,
-          device_info TEXT
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS rooms (
-          id TEXT PRIMARY KEY,
-          type TEXT,
-          name TEXT,
-          description TEXT,
-          avatar_url TEXT,
-          created_by TEXT,
-          created_at INTEGER
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS room_members (
-          room_id TEXT,
-          user_id TEXT,
-          role TEXT DEFAULT 'member',
-          joined_at INTEGER,
-          PRIMARY KEY (room_id, user_id)
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS messages (
-          id TEXT PRIMARY KEY,
-          from_user_id TEXT,
-          room_id TEXT,
-          content TEXT,
-          message_type TEXT DEFAULT 'text',
-          file_url TEXT,
-          file_name TEXT,
-          file_size INTEGER,
-          duration INTEGER DEFAULT 0,
-          created_at INTEGER,
-          is_read INTEGER DEFAULT 0
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS contacts (
-          user_id TEXT,
-          contact_id TEXT,
-          room_id TEXT,
-          status TEXT DEFAULT 'accepted',
-          created_at INTEGER,
-          PRIMARY KEY (user_id, contact_id)
-        )`);
-        db.run(`CREATE TABLE IF NOT EXISTS avatar_history (
-          id TEXT PRIMARY KEY,
-          user_id TEXT,
-          url TEXT,
-          created_at INTEGER
-        )`);
+        // Создаем таблицы (ошибки duplicate column игнорируем)
+        const tables = [
+          `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE, email TEXT UNIQUE, display_name TEXT, avatar_url TEXT, bio TEXT DEFAULT '', is_online INTEGER DEFAULT 0, last_seen INTEGER, created_at INTEGER)`,
+          `CREATE TABLE IF NOT EXISTS otp_codes (email TEXT PRIMARY KEY, code TEXT, expires_at INTEGER)`,
+          `CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT, token TEXT UNIQUE, created_at INTEGER, device_info TEXT)`,
+          `CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY, type TEXT, name TEXT, description TEXT, avatar_url TEXT, created_by TEXT, created_at INTEGER)`,
+          `CREATE TABLE IF NOT EXISTS room_members (room_id TEXT, user_id TEXT, role TEXT DEFAULT 'member', joined_at INTEGER, PRIMARY KEY (room_id, user_id))`,
+          `CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, from_user_id TEXT, room_id TEXT, content TEXT, message_type TEXT DEFAULT 'text', file_url TEXT, file_name TEXT, file_size INTEGER, duration INTEGER DEFAULT 0, created_at INTEGER, is_read INTEGER DEFAULT 0)`,
+          `CREATE TABLE IF NOT EXISTS contacts (user_id TEXT, contact_id TEXT, room_id TEXT, status TEXT DEFAULT 'accepted', created_at INTEGER, PRIMARY KEY (user_id, contact_id))`,
+          `CREATE TABLE IF NOT EXISTS avatar_history (id TEXT PRIMARY KEY, user_id TEXT, url TEXT, created_at INTEGER)`
+        ];
+        tables.forEach(t => db.run(t));
         resolve();
       });
     });
@@ -127,6 +73,8 @@ function runQuery(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function(err) {
       if (err) {
+        // Игнорируем ошибки дубликатов колонок при миграциях
+        if (err.message.includes('duplicate column')) return resolve(this);
         console.error('❌ SQL Error:', err.message);
         reject(err);
       } else resolve(this);
@@ -251,10 +199,10 @@ async function main() {
   for (const m of migrations) { try { await runQuery(m); } catch(e) {} }
 
   console.log('\n╔══════════════════════════════════════════════╗');
-  console.log('║   EchoVoid Server — Gmail SMTP               ║');
+  console.log('║   EchoVoid Server — Gmail SMTP (Fix)         ║');
   console.log('╚══════════════════════════════════════════════╝\n');
 
-  // ========== SEND CODE ==========
+  // ========== SEND CODE (ИСПРАВЛЕНО) ==========
   app.post('/api/auth/send-code', async (req, res) => {
     console.log('📧 POST /api/auth/send-code');
     try {
@@ -273,35 +221,33 @@ async function main() {
 
       console.log(`🔑 CODE: ${emailClean} → ${code}`);
 
-      // Отправляем через Gmail
-      try {
-        await transporter.sendMail({
-          from: `"EchoVoid" <${GMAIL_USER}>`,
-          to: emailClean,
-          subject: '🔐 Код входа EchoVoid',
-          html: `
-            <div style="font-family:system-ui,sans-serif;padding:30px;background:#0a0a0f;color:#f9fafb;border-radius:12px">
-              <h2 style="color:#e5e7eb;margin-bottom:16px">Ваш код для входа в EchoVoid</h2>
-              <div style="font-size:36px;font-weight:700;letter-spacing:8px;color:#a855f7;
-                          background:#1a1a2e;padding:20px;border-radius:8px;text-align:center;
-                          margin:20px 0">${code}</div>
-              <p style="color:#9ca3af;font-size:14px">Код действует 5 минут.</p>
-              <p style="color:#6b7280;font-size:12px;margin-top:20px">
-                Если вы не запрашивали код — просто игнорируйте это письмо.
-              </p>
-            </div>
-          `
-        });
-        console.log('✅ Email отправлен на:', emailClean);
-      } catch (e) {
-        console.error('❌ Gmail ошибка отправки:', e.message);
-        // Код всё равно сохранён — можно посмотреть в консоли
-      }
-
+      // ВАЖНО: Сразу отвечаем клиенту, чтобы сайт не висел!
       res.json({ success: true });
+
+      // Отправляем письмо В ФОНЕ (после ответа)
+      transporter.sendMail({
+        from: `"EchoVoid" <${GMAIL_USER}>`,
+        to: emailClean,
+        subject: '🔐 Код входа EchoVoid',
+        html: `
+          <div style="font-family:system-ui,sans-serif;padding:30px;background:#0a0a0f;color:#f9fafb;border-radius:12px">
+            <h2 style="color:#e5e7eb;margin-bottom:16px">Ваш код для входа в EchoVoid</h2>
+            <div style="font-size:36px;font-weight:700;letter-spacing:8px;color:#a855f7;
+                        background:#1a1a2e;padding:20px;border-radius:8px;text-align:center;
+                        margin:20px 0">${code}</div>
+            <p style="color:#9ca3af;font-size:14px">Код действует 5 минут.</p>
+          </div>
+        `
+      }).then(() => {
+        console.log('✅ Email успешно отправлен на:', emailClean);
+      }).catch(e => {
+        console.error('❌ Ошибка отправки Email:', e.message);
+      });
+
     } catch (e) {
       console.error('❌ Send code error:', e);
-      res.status(500).json({ error: 'Ошибка сервера' });
+      // Если еще не ответили, то отвечаем ошибкой
+      if (!res.headersSent) res.status(500).json({ error: 'Ошибка сервера' });
     }
   });
 
@@ -599,8 +545,19 @@ async function main() {
   app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
   const PORT = process.env.PORT || 3000;
-  server.listen(PORT, () => {
-    console.log(`🚀 Server: http://localhost:${PORT}`);
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    
+    // KEEP-ALIVE для Render (пингует сам себя каждые 14 минут)
+    if (process.env.RENDER) {
+      const url = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+      setInterval(() => {
+        // Используем fetch или http.get, чтобы не зависеть от Node версии
+        http.get(url + '/api/auth/me', (res) => {
+          // Игнорируем ответ, главное дернули сервер
+        }).on('error', (e) => {});
+      }, 14 * 60 * 1000); 
+    }
   });
 }
 
